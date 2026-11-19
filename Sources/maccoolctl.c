@@ -4,11 +4,13 @@
 //   maccoolctl auto          — вернуть управление системе
 //   maccoolctl max           — все вентиляторы на максимум
 //   maccoolctl set <0-100>   — процент между минимумом и максимумом
+//   maccoolctl nosleep on|off — не засыпать при закрытой крышке (pmset disablesleep)
 #include "smc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 static int fan_count(void) {
     double n = 0;
@@ -54,13 +56,38 @@ static int set_percent(int fans, double pct) {
     return err;
 }
 
+// Запуск системного pmset с фиксированными аргументами и пустым окружением.
+static int set_nosleep(int on) {
+    pid_t pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) {
+        char *args[] = { "pmset", "-a", "disablesleep", on ? "1" : "0", NULL };
+        char *env[] = { NULL };
+        execve("/usr/bin/pmset", args, env);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return 1;
+    return !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: maccoolctl auto | max | set <0-100>\n");
+        fprintf(stderr, "usage: maccoolctl auto | max | set <0-100> | nosleep on|off\n");
         return 2;
     }
     // Для setuid-бинарника поднимаем реальный uid до root, иначе AppleSMC не даст писать.
     if (geteuid() == 0) setuid(0);
+
+    // Сон не связан с вентиляторами — работает и на маках без них.
+    if (!strcmp(argv[1], "nosleep") && argc == 3) {
+        int on = !strcmp(argv[2], "on");
+        if (!on && strcmp(argv[2], "off")) { fprintf(stderr, "nosleep: on or off\n"); return 2; }
+        // pmset без root завершается с кодом 0, поэтому права проверяем сами.
+        if (getuid() != 0) { fprintf(stderr, "need root\n"); return 1; }
+        if (set_nosleep(on)) { fprintf(stderr, "pmset failed\n"); return 1; }
+        return 0;
+    }
 
     if (smc_open()) { fprintf(stderr, "cannot open AppleSMC\n"); return 1; }
     int fans = fan_count();

@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 
 /// Управляет вентиляторами через setuid-помощник maccoolctl.
 /// Помощник ставится один раз (с паролем администратора) в /Library/PrivilegedHelperTools.
@@ -62,4 +63,21 @@ enum FanController {
 
     static func setAuto() -> String? { run(["auto"]) }
     static func setPercent(_ pct: Int) -> String? { pct >= 100 ? run(["max"]) : run(["set", String(pct)]) }
+}
+
+/// «Не засыпать при закрытой крышке»: через помощника выполняет `pmset -a disablesleep 1/0`.
+/// Пока включено, мак не уходит в сон совсем — ни при закрытой крышке, ни по таймеру; экран гаснет как обычно.
+enum SleepControl {
+    /// Текущее состояние системы (читается без прав администратора).
+    static var isSleepDisabled: Bool {
+        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("IOPMrootDomain"))
+        guard svc != 0 else { return false }
+        defer { IOObjectRelease(svc) }
+        let v = IORegistryEntryCreateCFProperty(svc, "SleepDisabled" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+        return (v as? Bool) ?? false
+    }
+
+    static func set(disabled: Bool) -> String? {
+        FanController.run(["nosleep", disabled ? "on" : "off"])
+    }
 }

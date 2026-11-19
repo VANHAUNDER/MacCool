@@ -88,6 +88,8 @@ struct PanelView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Divider()
+            lidSection
+            Divider()
             footer
         }
         .padding(14)
@@ -210,6 +212,24 @@ struct PanelView: View {
             }
             if let err = m.lastError {
                 Text(err).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var lidSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $m.noSleepOnLid) {
+                Label("Не засыпать при закрытой крышке", systemImage: "laptopcomputer")
+            }
+            .toggleStyle(.switch).controlSize(.small)
+            if m.noSleepOnLid && m.sleepDisabledNow {
+                Text("Мак продолжит работать с закрытой крышкой и не уснёт по таймеру. Не убирай его в сумку — перегреется. При выходе из MacCool сон вернётся.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if m.noSleepOnLid {
+                Text("Не включилось: нужен помощник с правами администратора.")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

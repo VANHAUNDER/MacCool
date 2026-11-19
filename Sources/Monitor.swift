@@ -41,6 +41,19 @@ final class Monitor: ObservableObject {
         didSet { UserDefaults.standard.set(boostThreshold, forKey: "boostThreshold") }
     }
 
+    /// Не засыпать при закрытой крышке (pmset disablesleep). Запоминается;
+    /// при выходе из программы сон возвращается, при запуске включается снова.
+    @Published var noSleepOnLid = UserDefaults.standard.bool(forKey: "noSleepOnLid") {
+        didSet {
+            guard noSleepOnLid != oldValue, !syncingSleep else { return }
+            UserDefaults.standard.set(noSleepOnLid, forKey: "noSleepOnLid")
+            applySleepSetting()
+        }
+    }
+    /// Реальное состояние системы: сон сейчас отключён.
+    @Published var sleepDisabledNow = SleepControl.isSleepDisabled
+    private var syncingSleep = false
+
     /// Значение слайдера ручной скорости, %.
     @Published var customPct: Double = 60
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled {
@@ -71,7 +84,14 @@ final class Monitor: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 if self?.mode != .system { _ = FanController.setAuto() }
+                // Не оставляем мак без сна, когда программа не запущена.
+                if self?.noSleepOnLid == true, SleepControl.isSleepDisabled { _ = SleepControl.set(disabled: false) }
             }
+        }
+        // Пароль при запуске не спрашиваем: если помощника нет, панель подскажет.
+        if noSleepOnLid, helperInstalled, !sleepDisabledNow {
+            lastError = SleepControl.set(disabled: true)
+            sleepDisabledNow = SleepControl.isSleepDisabled
         }
     }
 
@@ -89,6 +109,7 @@ final class Monitor: ObservableObject {
         memUsed = load.memoryUsed()
         memPressure = load.memoryPressure()
         thermalState = ProcessInfo.processInfo.thermalState
+        sleepDisabledNow = SleepControl.isSleepDisabled
 
         if tickCount % 2 == 0 {
             Task.detached(priority: .utility) {
@@ -125,6 +146,22 @@ final class Monitor: ObservableObject {
         lastError = FanController.uninstall()
         mode = .system
         helperInstalled = FanController.isInstalled
+    }
+
+    private func applySleepSetting() {
+        if !helperInstalled { installHelper() }
+        if helperInstalled {
+            lastError = SleepControl.set(disabled: noSleepOnLid)
+        }
+        sleepDisabledNow = SleepControl.isSleepDisabled
+        // Не получилось (отменили пароль, ошибка) — возвращаем переключатель к реальному состоянию.
+        if sleepDisabledNow != noSleepOnLid {
+            if lastError == nil, helperInstalled { lastError = "Не удалось изменить режим сна" }
+            syncingSleep = true
+            noSleepOnLid = sleepDisabledNow
+            UserDefaults.standard.set(noSleepOnLid, forKey: "noSleepOnLid")
+            syncingSleep = false
+        }
     }
 
     private func reapply() {
